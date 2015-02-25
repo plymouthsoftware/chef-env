@@ -1,0 +1,107 @@
+#!/usr/local/var/rbenv/shims/ruby
+# (change to local interpreter, e.g. /usr/bin/ruby if you don't use rbenv)
+
+require "thor"
+require 'fileutils'
+
+class ChefEnv < Thor
+  @@config = {
+    link_path: "#{ENV['HOME']}/.chef",
+    configs_path: "#{ENV['HOME']}/.chef-configs"
+  }
+
+  desc "init", "Initialise the chef-env filesystem creating folders"
+  def init
+    return unless init_preflight_check
+
+    print "Creating directory #{@@config[:configs_path]}..."
+    FileUtils.mkdir_p "#{@@config[:configs_path]}"
+
+    if File.directory?(@@config[:configs_path]) && !symlink_exists? && File.directory?(@@config[:link_path])
+      print "Moving @@config[:link_path] to #{@@config[:configs_path]}/default..."
+      FileUtils.mv @@config[:link_path],"#{@@config[:configs_path]}/default", verbose: true
+      puts "OK"
+    end
+
+    puts "Finished.\n\n"
+    puts "USAGE\n=====\n\n"
+
+    if File.directory?("#{@@config[:configs_path]}/default")
+      puts "To get started:\n\n  chef-env use default\n\n"
+    else
+      puts "To get started, create a new chef configuration in `#{@@config[:configs_path]}/default`\n\n"
+    end
+
+    puts "Then:\n\n  $ chef-env use default\n\nYou can now run knife commands as normal, e.g:\n\n  $ knife node list\n\n"
+  end
+
+  desc "list", "List available configurations from #{@@config[:configs_path]}"
+  def list
+    puts "List of chef configurations available in #{@@config[:configs_path]}:\n"
+
+    Dir["#{@@config[:configs_path]}/*"].each do |f|
+      puts "  #{File.basename(f)}" if File.directory?(f)
+    end
+  end
+
+  desc "clear", "Remove the #{@@config[:link_path]} symlink (e.g. to use your repo's local knife config)"
+  def clear
+    unless File.exist?(@@config[:link_path])
+      puts "#{@@config[:link_path]} symlink is not present"
+      return
+    end
+
+    check_symlink!
+
+    `rm #{@@config[:link_path]}`
+  end
+
+  desc "use CONFIG", "Use the specified CONFIG #{@@config[:link_path]} (must be a sub-folder in @@config[:configs_path])"
+  def use(config_name)
+    config_path = "#{@@config[:configs_path]}/#{config_name}"
+
+    unless File.directory?(config_path)
+      puts "'#{config_name}' configuration is not present (searched for #{config_path})\n\n"
+      list
+
+      return
+    end
+
+    `rm -f #{@@config[:link_path]}` if symlink_exists?
+    `ln -sf #{config_path} #{@@config[:link_path]}`
+  end
+
+  private
+
+  def symlink_exists?
+    File.exist?(@@config[:link_path]) && File.lstat(@@config[:link_path]).symlink?
+  end
+
+  def check_symlink!
+    raise "#{@@config[:link_path]} is not a symlink!" unless symlink_exists?
+  end
+
+  def init_preflight_check
+    print "Checking existing environment"
+
+    if !symlink_exists? && File.directory?(@@config[:link_path])
+      puts "...\n\n  WARN: #{@@config[:link_path]} is a real directory! It will be moved to '#{@@config[:config_path]}/default'"
+    end
+
+    if symlink_exists?
+      puts "...\n\n  #{@@config[:link_path]} is already a symlink. Aborting."
+      return false
+    end
+
+    if File.directory?(@@config[:configs_path]) || File.exist?(@@config[:configs_path])
+      puts "...\n\n  #{@@config[:configs_path]} already exists. Aborting." if File.directory?(@@config[:configs_path])
+      return false
+    end
+
+    puts "...OK"
+
+    true
+  end
+end
+
+ChefEnv.start(ARGV)
